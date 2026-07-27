@@ -77,7 +77,6 @@ static irqreturn_t decon_irq_handler(int irq, void *dev_data)
 		decon_err("%s: DECON%d timeout irq occurs\n", __func__, decon->id);
 #if defined(CONFIG_EXYNOS_AFBC)
 		dpu_dump_afbc_info();
-		BUG();
 #endif
 	}
 
@@ -310,7 +309,6 @@ int decon_error_cb(struct decon_device *decon,
 #ifdef CONFIG_LOGGING_BIGDATA_BUG
 		log_decon_bigdata(decon);
 #endif
-		BUG();
 	}
 
 	decon_bypass_off(decon);

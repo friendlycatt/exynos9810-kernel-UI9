@@ -3775,7 +3775,6 @@ static int decon_initial_display(struct decon_device *decon, bool is_colormap)
 	decon_to_init_param(decon, &p);
 	if (decon_reg_init(decon->id, decon->dt.out_idx[0], &p) < 0)
 		goto decon_init_done;
-	goto decon_init_done;
 #if defined(CONFIG_EXYNOS_COMMON_PANEL)
 	if (1) {
 		/*

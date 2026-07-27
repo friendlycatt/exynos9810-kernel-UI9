@@ -1706,6 +1706,10 @@ static int dsim_probe(struct platform_device *pdev)
 	/* HACK */
 	phy_init(dsim->phy);
 	dsim->state = DSIM_STATE_INIT;
+
+#if defined(CONFIG_NO_LCD)
+	dsim_info("dsim%d: CONFIG_NO_LCD enabled, skipping DSI enable and panel init\n", dsim->id);
+#else
 	dsim_enable(dsim);
 
 	/* TODO: If you want to enable DSIM BIST mode. you must turn on LCD here */
@@ -1719,6 +1723,7 @@ static int dsim_probe(struct platform_device *pdev)
 	/* TODO: This is for dsim BIST mode in zebu emulator. only for test*/
 	call_panel_ops(dsim, displayon, dsim);
 	dsim_set_bist(dsim->id, true);
+#endif
 #endif
 	//dsim_set_bist(dsim->id, true);
 
