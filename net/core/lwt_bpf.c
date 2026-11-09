@@ -1,13 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2016 Thomas Graf <tgraf@tgraf.ch>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of version 2 of the GNU General Public
- * License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -16,6 +8,7 @@
 #include <linux/types.h>
 #include <linux/bpf.h>
 #include <net/lwtunnel.h>
+#include <net/ipv6_stubs.h>
 
 struct bpf_lwt_prog {
 	struct bpf_prog *prog;
@@ -353,7 +346,7 @@ static int bpf_encap_nlsize(struct lwtunnel_state *lwtstate)
 	       0;
 }
 
-int bpf_lwt_prog_cmp(struct bpf_lwt_prog *a, struct bpf_lwt_prog *b)
+static int bpf_lwt_prog_cmp(struct bpf_lwt_prog *a, struct bpf_lwt_prog *b)
 {
 	/* FIXME:
 	 * The LWT state is currently rebuilt for delete requests which
@@ -387,6 +380,7 @@ static const struct lwtunnel_encap_ops bpf_encap_ops = {
 	.fill_encap	= bpf_fill_encap_info,
 	.get_encap_size = bpf_encap_nlsize,
 	.cmp_encap	= bpf_encap_cmp,
+	.owner		= THIS_MODULE,
 };
 
 static int __init bpf_lwt_init(void)

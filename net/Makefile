@@ -19,6 +19,11 @@ obj-$(CONFIG_INET)		+= ipv4/
 obj-$(CONFIG_XFRM)		+= xfrm/
 obj-$(CONFIG_UNIX_SCM)		+= unix/
 obj-$(CONFIG_NET)		+= ipv6/
+ifneq ($(CC_CAN_LINK),y)
+$(warning CC cannot link executables. Skipping bpfilter.)
+else
+obj-$(CONFIG_BPFILTER)		+= bpfilter/
+endif
 obj-$(CONFIG_MPTCP)		+= mptcp/
 obj-$(CONFIG_PACKET)		+= packet/
 obj-$(CONFIG_NET_KEY)		+= key/
