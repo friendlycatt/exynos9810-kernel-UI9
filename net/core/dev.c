@@ -4000,8 +4000,14 @@ int do_xdp_generic(struct bpf_prog *xdp_prog, struct sk_buff *skb)
 		if (act != XDP_PASS) {
 			switch (act) {
 			case XDP_REDIRECT:
+				/*
+				 * The v5.15 signature carries an xdp_buff that this
+				 * tree's generic XDP path does not build; NULL keeps
+				 * the pre-backport behaviour (XSKMAP was never
+				 * reachable from here either).
+				 */
 				err = xdp_do_generic_redirect(skb->dev, skb,
-							      xdp_prog);
+							      NULL, xdp_prog);
 				if (err)
 					goto out_redir;
 			/* fallthru to submit skb */
@@ -7042,6 +7048,20 @@ static int dev_xdp_install(struct net_device *dev, bpf_op_t bpf_op,
 	xdp.prog = prog;
 
 	return bpf_op(dev, &xdp);
+}
+
+/**
+ *	bpf_xdp_link_attach - attach a bpf program to a device through a link
+ *	@attr: bpf link create attributes
+ *	@prog: the xdp program to attach
+ *
+ *	The v5.15 XDP link infrastructure is not backported into this tree, so
+ *	BPF_LINK_CREATE for BPF_XDP links is not supported.  Userspace falls
+ *	back to BPF_SET_LINK / netlink based attachment.
+ */
+int bpf_xdp_link_attach(const union bpf_attr *attr, struct bpf_prog *prog)
+{
+	return -EOPNOTSUPP;
 }
 
 /**

@@ -52,13 +52,19 @@
 #define DEV_CREATE_FLAG_MASK \
 	(BPF_F_NUMA_NODE | BPF_F_RDONLY | BPF_F_WRONLY)
 
-struct xdp_dev_bulk_queue {
-	struct xdp_frame *q[DEV_MAP_BULK_SIZE];
-	struct list_head flush_node;
-	struct net_device *dev;
-	struct net_device *dev_rx;
-	unsigned int count;
-};
+/*
+ * Note on the bulk queue:
+ *
+ * Upstream v5.15 batches frames in a per-CPU "xdp_dev_bulk_queue" hung off
+ * net_device::xdp_bulkq and flushes them through
+ * ndo_xdp_xmit(dev, num_frames, frames, flags).  This 4.9 vendor tree still
+ * has the original single-buffer callback,
+ * ndo_xdp_xmit(dev, struct xdp_buff *xdp), and no net_device::xdp_bulkq at
+ * all.  Adapting every in-tree driver to the newer callback is out of scope
+ * for a BPF subsystem backport, so devmap redirect reports -EOPNOTSUPP
+ * instead of silently dropping frames.  Map creation, lookup, update and
+ * delete all work normally.
+ */
 
 struct bpf_dtab_netdev {
 	struct net_device *dev; /* must be first member, due to tracepoint */
@@ -82,7 +88,6 @@ struct bpf_dtab {
 	u32 n_buckets;
 };
 
-static DEFINE_PER_CPU(struct list_head, dev_flush_list);
 static DEFINE_SPINLOCK(dev_map_lock);
 static LIST_HEAD(dev_map_list);
 
@@ -344,65 +349,14 @@ bool dev_map_can_have_prog(struct bpf_map *map)
 	return false;
 }
 
-static void bq_xmit_all(struct xdp_dev_bulk_queue *bq, u32 flags)
-{
-	struct net_device *dev = bq->dev;
-	int sent = 0, drops = 0, err = 0;
-	int i;
-
-	if (unlikely(!bq->count))
-		return;
-
-	for (i = 0; i < bq->count; i++) {
-		struct xdp_frame *xdpf = bq->q[i];
-
-		prefetch(xdpf);
-	}
-
-	sent = dev->netdev_ops->ndo_xdp_xmit(dev, bq->count, bq->q, flags);
-	if (sent < 0) {
-		err = sent;
-		sent = 0;
-		goto error;
-	}
-	drops = bq->count - sent;
-out:
-	bq->count = 0;
-
-	trace_xdp_devmap_xmit(bq->dev_rx, dev, sent, drops, err);
-	bq->dev_rx = NULL;
-	__list_del_clearprev(&bq->flush_node);
-	return;
-error:
-	/* If ndo_xdp_xmit fails with an errno, no frames have been
-	 * xmit'ed and it's our responsibility to them free all.
-	 */
-	for (i = 0; i < bq->count; i++) {
-		struct xdp_frame *xdpf = bq->q[i];
-
-		xdp_return_frame_rx_napi(xdpf);
-		drops++;
-	}
-	goto out;
-}
-
 /* __dev_flush is called from xdp_do_flush() which _must_ be signaled
- * from the driver before returning from its napi->poll() routine. The poll()
- * routine is called either from busy_poll context or net_rx_action signaled
- * from NET_RX_SOFTIRQ. Either way the poll routine must complete before the
- * net device can be torn down. On devmap tear down we ensure the flush list
- * is empty before completing to ensure all flush operations have completed.
- * When drivers update the bpf program they may need to ensure any flush ops
- * are also complete. Using synchronize_rcu or call_rcu will suffice for this
- * because both wait for napi context to exit.
+ * from the driver before returning from its napi->poll() routine.
+ *
+ * Upstream v5.15 flushes the per-CPU bulk queues here.  This tree transmits
+ * immediately (see __xdp_enqueue), so there is nothing pending to flush.
  */
 void __dev_flush(void)
 {
-	struct list_head *flush_list = this_cpu_ptr(&dev_flush_list);
-	struct xdp_dev_bulk_queue *bq, *tmp;
-
-	list_for_each_entry_safe(bq, tmp, flush_list, flush_node)
-		bq_xmit_all(bq, XDP_XMIT_FLUSH);
 }
 
 /* rcu_read_lock (from syscall and BPF contexts) ensures that if a delete and/or
@@ -422,49 +376,15 @@ struct bpf_dtab_netdev *__dev_map_lookup_elem(struct bpf_map *map, u32 key)
 }
 
 /* Runs under RCU-read-side, plus in softirq under NAPI protection.
- * Thus, safe percpu variable access.
+ *
+ * Upstream v5.15 builds an xdp_frame and queues it on the per-CPU bulk queue
+ * of the target device.  That requires the multi-frame ndo_xdp_xmit() ABI,
+ * which this tree does not have, so redirect is reported as unsupported.
  */
-static void bq_enqueue(struct net_device *dev, struct xdp_frame *xdpf,
-		       struct net_device *dev_rx)
-{
-	struct list_head *flush_list = this_cpu_ptr(&dev_flush_list);
-	struct xdp_dev_bulk_queue *bq = this_cpu_ptr(dev->xdp_bulkq);
-
-	if (unlikely(bq->count == DEV_MAP_BULK_SIZE))
-		bq_xmit_all(bq, 0);
-
-	/* Ingress dev_rx will be the same for all xdp_frame's in
-	 * bulk_queue, because bq stored per-CPU and must be flushed
-	 * from net_device drivers NAPI func end.
-	 */
-	if (!bq->dev_rx)
-		bq->dev_rx = dev_rx;
-
-	bq->q[bq->count++] = xdpf;
-
-	if (!bq->flush_node.prev)
-		list_add(&bq->flush_node, flush_list);
-}
-
 static inline int __xdp_enqueue(struct net_device *dev, struct xdp_buff *xdp,
 			       struct net_device *dev_rx)
 {
-	struct xdp_frame *xdpf;
-	int err;
-
-	if (!dev->netdev_ops->ndo_xdp_xmit)
-		return -EOPNOTSUPP;
-
-	err = xdp_ok_fwd_dev(dev, xdp->data_end - xdp->data);
-	if (unlikely(err))
-		return err;
-
-	xdpf = xdp_convert_buff_to_frame(xdp);
-	if (unlikely(!xdpf))
-		return -EOVERFLOW;
-
-	bq_enqueue(dev, xdpf, dev_rx);
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 static struct xdp_buff *dev_map_run_prog(struct net_device *dev,
@@ -810,20 +730,14 @@ static int dev_map_notification(struct notifier_block *notifier,
 {
 	struct net_device *netdev = netdev_notifier_info_to_dev(ptr);
 	struct bpf_dtab *dtab;
-	int i, cpu;
+	int i;
 
 	switch (event) {
 	case NETDEV_REGISTER:
-		if (!netdev->netdev_ops->ndo_xdp_xmit || netdev->xdp_bulkq)
-			break;
-
-		/* will be freed in free_netdev() */
-		netdev->xdp_bulkq = alloc_percpu(struct xdp_dev_bulk_queue);
-		if (!netdev->xdp_bulkq)
-			return NOTIFY_BAD;
-
-		for_each_possible_cpu(cpu)
-			per_cpu_ptr(netdev->xdp_bulkq, cpu)->dev = netdev;
+		/* Upstream allocates netdev->xdp_bulkq here.  This tree has no
+		 * bulk queue and no multi-frame ndo_xdp_xmit(), so nothing to
+		 * do on registration.
+		 */
 		break;
 	case NETDEV_UNREGISTER:
 		/* This rcu_read_lock/unlock pair is needed because
@@ -864,15 +778,8 @@ static struct notifier_block dev_map_notifier = {
 
 static int __init dev_map_init(void)
 {
-	int cpu;
-
-	/* Assure tracepoint shadow struct _bpf_dtab_netdev is in sync */
-	BUILD_BUG_ON(offsetof(struct bpf_dtab_netdev, dev) !=
-		     offsetof(struct _bpf_dtab_netdev, dev));
 	register_netdevice_notifier(&dev_map_notifier);
 
-	for_each_possible_cpu(cpu)
-		INIT_LIST_HEAD(&per_cpu(dev_flush_list, cpu));
 	return 0;
 }
 

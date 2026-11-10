@@ -16,12 +16,14 @@
 #include <linux/sched.h>
 #include <linux/capability.h>
 #include <linux/cryptohash.h>
+#include <crypto/sha.h>
 #include <linux/kallsyms.h>
 #include <linux/if_vlan.h>
 #include <linux/vmalloc.h>
 #include <linux/sockptr.h>
 
 #include <net/sch_generic.h>
+#include <net/xdp.h>
 
 #include <asm/cacheflush.h>
 #include <asm/byteorder.h>

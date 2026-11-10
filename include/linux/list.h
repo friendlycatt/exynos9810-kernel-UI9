@@ -119,6 +119,16 @@ static inline void __list_del_entry(struct list_head *entry)
 	__list_del(entry->prev, entry->next);
 }
 
+/* Backported from v4.20: delete and mark the entry as "not on a list" so that
+ * a later list_add() on the same node cannot corrupt the list.  The BPF
+ * devmap/cpumap flush lists rely on this.
+ */
+static inline void __list_del_clearprev(struct list_head *entry)
+{
+	__list_del(entry->prev, entry->next);
+	entry->prev = NULL;
+}
+
 static inline void list_del(struct list_head *entry)
 {
 	__list_del_entry(entry);
@@ -663,6 +673,14 @@ static inline void INIT_HLIST_NODE(struct hlist_node *h)
 static inline int hlist_unhashed(const struct hlist_node *h)
 {
 	return !h->pprev;
+}
+
+/* Backported from v5.15: used by BPF local storage to test membership without
+ * taking the bucket lock.
+ */
+static inline int hlist_unhashed_lockless(const struct hlist_node *h)
+{
+	return !READ_ONCE(h->pprev);
 }
 
 static inline int hlist_empty(const struct hlist_head *h)

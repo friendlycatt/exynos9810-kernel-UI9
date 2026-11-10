@@ -1312,3 +1312,37 @@ static int __init bpf_event_init(void)
 
 fs_initcall(bpf_event_init);
 #endif /* CONFIG_MODULES */
+
+/*
+ * Backport of the v5.15 helper used by BPF_OBJ_GET_INFO_BY_FD to describe a
+ * perf event fd.  This tree stores the attached programs in a prog_array
+ * (4.9 model) rather than in perf_event::prog, so only the tracepoint case
+ * can be resolved; kprobe/uprobe reporting is not available here.
+ */
+int bpf_get_perf_event_info(const struct perf_event *event, u32 *prog_id,
+			    u32 *fd_type, const char **buf,
+			    u64 *probe_offset, u64 *probe_addr)
+{
+	const struct bpf_prog_array_item *item;
+	const struct bpf_prog *prog;
+
+	if (!event->tp_event || !event->tp_event->prog_array)
+		return -ENOENT;
+
+	item = &bpf_prog_array_item(event->tp_event->prog_array, 0);
+	prog = item->prog;
+	if (!prog)
+		return -ENOENT;
+
+	*prog_id = prog->aux->id;
+
+	if (event->tp_event->flags & TRACE_EVENT_FL_TRACEPOINT) {
+		*buf = event->tp_event->tp->name;
+		*fd_type = BPF_FD_TYPE_TRACEPOINT;
+		*probe_offset = 0;
+		*probe_addr = 0;
+		return 0;
+	}
+
+	return -EOPNOTSUPP;
+}

@@ -71,3 +71,63 @@ bool xdp_rxq_info_is_reg(struct xdp_rxq_info *xdp_rxq)
 	return (xdp_rxq->reg_state == REG_STATE_REGISTERED);
 }
 EXPORT_SYMBOL_GPL(xdp_rxq_info_is_reg);
+
+/*
+ * Backported from v5.15: frame bookkeeping for devmap/cpumap.
+ *
+ * v5.15 stores a struct xdp_frame inside the packet headroom and passes it
+ * around between CPUs.  This tree has no page_pool and no zero-copy support,
+ * so everything here is the MEM_TYPE_PAGE_SHARED (one page per packet) model:
+ * the page that backs the frame is the one the driver handed to XDP, and
+ * returning the frame simply drops that page reference.
+ */
+struct xdp_frame *xdp_convert_buff_to_frame(struct xdp_buff *xdp)
+{
+	struct xdp_frame *xdp_frame;
+
+	/* The frame is built in the headroom, right at data_hard_start. */
+	xdp_frame = xdp->data_hard_start;
+	xdp_frame->data = xdp->data;
+	xdp_frame->len = xdp->data_end - xdp->data;
+	xdp_frame->headroom = xdp->data - xdp->data_hard_start -
+			      sizeof(struct xdp_frame);
+	xdp_frame->metasize = xdp->data - xdp->data_meta;
+	xdp_frame->frame_sz = xdp->frame_sz;
+	xdp_frame->dev_rx = NULL;
+	xdp_frame->mem.type = MEM_TYPE_PAGE_SHARED;
+	xdp_frame->mem.id = 0;
+
+	return xdp_frame;
+}
+EXPORT_SYMBOL_GPL(xdp_convert_buff_to_frame);
+
+void xdp_return_frame(struct xdp_frame *xdpf)
+{
+	struct page *page = virt_to_head_page(xdpf->data);
+
+	put_page(page);
+}
+EXPORT_SYMBOL_GPL(xdp_return_frame);
+
+/* The _rx_napi variant exists upstream to pick a different recycle strategy
+ * when page_pool is in use.  Without page_pool both paths are identical.
+ */
+void xdp_return_frame_rx_napi(struct xdp_frame *xdpf)
+{
+	xdp_return_frame(xdpf);
+}
+EXPORT_SYMBOL_GPL(xdp_return_frame_rx_napi);
+
+void xdp_return_buff(struct xdp_buff *xdp)
+{
+	struct page *page = virt_to_head_page(xdp->data);
+
+	put_page(page);
+}
+EXPORT_SYMBOL_GPL(xdp_return_buff);
+
+void xdp_warn(const char *msg, const char *func, const int line)
+{
+	WARN(1, "XDP_WARN: %s(line:%d): %s\n", func, line, msg);
+}
+EXPORT_SYMBOL_GPL(xdp_warn);

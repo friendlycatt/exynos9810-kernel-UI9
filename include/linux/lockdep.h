@@ -281,6 +281,10 @@ extern void lockdep_on(void);
 extern void lockdep_init_map(struct lockdep_map *lock, const char *name,
 			     struct lock_class_key *key, int subclass);
 
+/* Backported from v5.15: dynamic lock-class keys (used by BPF hash maps). */
+extern void lockdep_register_key(struct lock_class_key *key);
+extern void lockdep_unregister_key(struct lock_class_key *key);
+
 /*
  * To initialize a lockdep_map statically use this macro.
  * Note that _name must not be NULL.
@@ -410,6 +414,10 @@ static inline void lockdep_on(void)
 #define lockdep_set_subclass(lock, sub)		do { } while (0)
 
 #define lockdep_set_novalidate_class(lock) do { } while (0)
+
+/* Backported from v5.15: dynamic lock-class keys (used by BPF hash maps). */
+# define lockdep_register_key(key)		do { } while (0)
+# define lockdep_unregister_key(key)		do { } while (0)
 
 /*
  * We don't define lockdep_match_class() and lockdep_match_key() for !LOCKDEP

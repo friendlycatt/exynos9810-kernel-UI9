@@ -756,7 +756,7 @@ out:
 
 static int bpf_fill_super(struct super_block *sb, void *data, int silent)
 {
-	static const struct tree_descr bpf_rfiles[] = { { "" } };
+	static struct tree_descr bpf_rfiles[] = { { "" } };
 	struct bpf_mount_opts opts;
 	struct inode *inode;
 	int ret;

@@ -1964,7 +1964,7 @@ BPF_CALL_5(bpf_l4_csum_replace, struct sk_buff *, skb, u32, offset,
 		if (unlikely(from != 0))
 			return -EINVAL;
 
-		inet_proto_csum_replace_by_diff(ptr, skb, to, is_pseudo, is_ipv6);
+		inet_proto_csum_replace_by_diff(ptr, skb, to, is_pseudo);
 		break;
 	case 2:
 		inet_proto_csum_replace2(ptr, skb, from, to, is_pseudo);
@@ -2114,7 +2114,7 @@ static inline int __bpf_tx_skb(struct net_device *dev, struct sk_buff *skb)
 	}
 
 	skb->dev = dev;
-	skb->tstamp = 0;
+	skb->tstamp = ktime_set(0, 0);
 
 	dev_xmit_recursion_inc();
 	ret = dev_queue_xmit(skb);
@@ -2192,7 +2192,7 @@ static int bpf_out_neigh_v6(struct net *net, struct sk_buff *skb,
 	}
 
 	skb->dev = dev;
-	skb->tstamp = 0;
+	skb->tstamp = ktime_set(0, 0);
 
 	if (unlikely(skb_headroom(skb) < hh_len && dev->header_ops)) {
 		struct sk_buff *skb2;
@@ -2299,7 +2299,7 @@ static int bpf_out_neigh_v4(struct net *net, struct sk_buff *skb,
 	}
 
 	skb->dev = dev;
-	skb->tstamp = 0;
+	skb->tstamp = ktime_set(0, 0);
 
 	if (unlikely(skb_headroom(skb) < hh_len && dev->header_ops)) {
 		struct sk_buff *skb2;
@@ -2320,7 +2320,7 @@ static int bpf_out_neigh_v4(struct net *net, struct sk_buff *skb,
 		struct dst_entry *dst = skb_dst(skb);
 		struct rtable *rt = container_of(dst, struct rtable, dst);
 
-		neigh = ip_neigh_for_gw(rt, skb, &is_v6gw);
+		neigh = ip_neigh_gw4(dev, rt->rt_gateway);
 	} else if (nh->nh_family == AF_INET6) {
 		neigh = ip_neigh_gw6(dev, &nh->ipv6_nh);
 		is_v6gw = true;
@@ -3616,7 +3616,7 @@ BPF_CALL_4(sk_skb_adjust_room, struct sk_buff *, skb, s32, len_diff,
 	}
 	bpf_compute_data_end_sk_skb(skb);
 	if (tls_sw_has_ctx_rx(skb->sk)) {
-		struct strp_msg *rxm = strp_msg(skb);
+		struct strp_rx_msg *rxm = strp_rx_msg(skb);
 
 		rxm->full_len += len_diff;
 	}
@@ -4871,7 +4871,8 @@ static int _bpf_setsockopt(struct sock *sk, int level, int optname,
 			strncpy(name, optval, min_t(long, optlen,
 						    TCP_CA_NAME_MAX-1));
 			name[TCP_CA_NAME_MAX-1] = 0;
-			ret = tcp_set_congestion_control(sk, name, false, true);
+			ret = tcp_set_congestion_control(sk, name, false, false,
+							 true);
 		} else {
 			struct inet_connection_sock *icsk = inet_csk(sk);
 			struct tcp_sock *tp = tcp_sk(sk);
@@ -5221,7 +5222,7 @@ BPF_CALL_3(bpf_bind, struct bpf_sock_addr_kern *, ctx, struct sockaddr *, addr,
 {
 #ifdef CONFIG_INET
 	struct sock *sk = ctx->sk;
-	u32 flags = BIND_FROM_BPF;
+	bool force_no_port = false;
 	int err;
 
 	err = -EINVAL;
@@ -5231,18 +5232,20 @@ BPF_CALL_3(bpf_bind, struct bpf_sock_addr_kern *, ctx, struct sockaddr *, addr,
 		if (addr_len < sizeof(struct sockaddr_in))
 			return err;
 		if (((struct sockaddr_in *)addr)->sin_port == htons(0))
-			flags |= BIND_FORCE_ADDRESS_NO_PORT;
-		return __inet_bind(sk, addr, addr_len, flags);
+			force_no_port = true;
+		/* The caller already holds the socket lock. */
+		return __inet_bind(sk, addr, addr_len, force_no_port, false);
 #if IS_ENABLED(CONFIG_IPV6)
 	} else if (addr->sa_family == AF_INET6) {
 		if (addr_len < SIN6_LEN_RFC2133)
 			return err;
 		if (((struct sockaddr_in6 *)addr)->sin6_port == htons(0))
-			flags |= BIND_FORCE_ADDRESS_NO_PORT;
+			force_no_port = true;
 		/* ipv6_bpf_stub cannot be NULL, since it's called from
 		 * bpf_cgroup_inet6_connect hook and ipv6 is already loaded
 		 */
-		return ipv6_bpf_stub->inet6_bind(sk, addr, addr_len, flags);
+		return ipv6_bpf_stub->inet6_bind(sk, addr, addr_len,
+						 force_no_port, false);
 #endif /* CONFIG_IPV6 */
 	}
 #endif /* CONFIG_INET */

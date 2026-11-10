@@ -268,6 +268,14 @@ void sock_gen_put(struct sock *sk)
 }
 EXPORT_SYMBOL_GPL(sock_gen_put);
 
+/* Backported from v5.15: skb destructor for bpf_sk_assign()'d sockets. */
+void sock_pfree(struct sk_buff *skb)
+{
+	if (sk_is_refcounted(skb->sk))
+		sock_gen_put(skb->sk);
+}
+EXPORT_SYMBOL(sock_pfree);
+
 void sock_edemux(struct sk_buff *skb)
 {
 	sock_gen_put(skb->sk);

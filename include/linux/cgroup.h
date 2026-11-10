@@ -614,6 +614,15 @@ static inline ino_t cgroup_ino(struct cgroup *cgrp)
 	return cgrp->kn->id.ino;
 }
 
+/*
+ * Backported from v5.15 for the BPF cgroup_id() helpers.  This tree predates
+ * kernfs 64-bit IDs, so the (unique) kernfs inode number is used instead.
+ */
+static inline u64 cgroup_id(struct cgroup *cgrp)
+{
+	return (u64)cgroup_ino(cgrp);
+}
+
 /* cft/css accessors for cftype->write() operation */
 static inline struct cftype *of_cft(struct kernfs_open_file *of)
 {
@@ -810,6 +819,24 @@ static inline void put_cgroup_ns(struct cgroup_namespace *ns)
 	if (ns && refcount_dec_and_test(&ns->count))
 		free_cgroup_ns(ns);
 }
+
+#ifdef CONFIG_CGROUP_BPF
+static inline void cgroup_bpf_get(struct cgroup *cgrp)
+{
+	percpu_ref_get(&cgrp->bpf.refcnt);
+}
+
+static inline void cgroup_bpf_put(struct cgroup *cgrp)
+{
+	percpu_ref_put(&cgrp->bpf.refcnt);
+}
+
+#else /* CONFIG_CGROUP_BPF */
+
+static inline void cgroup_bpf_get(struct cgroup *cgrp) {}
+static inline void cgroup_bpf_put(struct cgroup *cgrp) {}
+
+#endif /* CONFIG_CGROUP_BPF */
 
 #ifdef CONFIG_CGROUPS
 

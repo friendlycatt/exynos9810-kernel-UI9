@@ -283,6 +283,8 @@ enum
 	LINUX_MIB_TCPMTUPFAIL,			/* TCPMTUPFail */
 	LINUX_MIB_TCPMTUPSUCCESS,		/* TCPMTUPSuccess */
 	LINUX_MIB_TCPWQUEUETOOBIG,		/* TCPWqueueTooBig */
+	/* Backported from v5.15 (BPF redirect helpers). */
+	LINUX_MIB_PFMEMALLOCDROP,		/* PFMemallocDrop */
 	__LINUX_MIB_MAX
 };
 

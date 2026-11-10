@@ -7,6 +7,7 @@
 #include <linux/percpu.h>
 #include <linux/percpu-refcount.h>
 #include <linux/rbtree.h>
+#include <linux/indirect_call_wrapper.h>
 #include <uapi/linux/bpf.h>
 
 struct sock;
@@ -314,6 +315,17 @@ int bpf_percpu_cgroup_storage_update(struct bpf_map *map, void *key,
 	__ret;								       \
 })
 
+/*
+ * This tree's inet_bind()/inet6_bind() still use the pre-v5.8 two-argument
+ * form.  Keep them working (without the CAP_NET_BIND_SERVICE bypass flag,
+ * which this tree does not implement) instead of rewriting vendor code.
+ */
+#define BPF_CGROUP_RUN_PROG_INET4_BIND(sk, uaddr)			       \
+	BPF_CGROUP_RUN_SA_PROG_LOCK(sk, uaddr, BPF_CGROUP_INET4_BIND, NULL)
+
+#define BPF_CGROUP_RUN_PROG_INET6_BIND(sk, uaddr)			       \
+	BPF_CGROUP_RUN_SA_PROG_LOCK(sk, uaddr, BPF_CGROUP_INET6_BIND, NULL)
+
 #define BPF_CGROUP_PRE_CONNECT_ENABLED(sk)				       \
 	((cgroup_bpf_enabled(BPF_CGROUP_INET4_CONNECT) ||		       \
 	  cgroup_bpf_enabled(BPF_CGROUP_INET6_CONNECT)) &&		       \
@@ -393,14 +405,17 @@ int bpf_percpu_cgroup_storage_update(struct bpf_map *map, void *key,
 })
 
 
-#define BPF_CGROUP_RUN_PROG_SYSCTL(head, table, write, buf, count, pos)  \
+/*
+ * The v5.15 cgroup sysctl hook passes the sysctl handler a kernel buffer and
+ * takes ownership of it (it may kfree() the old one and install a new one).
+ * This tree's proc_sysctl still hands user pointers straight to the handler,
+ * so the hook cannot be wired up without restructuring that path.  Keep the
+ * call sites compiling with a no-op that reports "no new buffer".
+ */
+#define BPF_CGROUP_RUN_PROG_SYSCTL(head, table, write, buf, count, pos, new_buf) \
 ({									       \
-	int __ret = 0;							       \
-	if (cgroup_bpf_enabled(BPF_CGROUP_SYSCTL))			       \
-		__ret = __cgroup_bpf_run_filter_sysctl(head, table, write,     \
-						       buf, count, pos,        \
-						       BPF_CGROUP_SYSCTL);     \
-	__ret;								       \
+	*(new_buf) = NULL;						       \
+	0;								       \
 })
 
 #define BPF_CGROUP_RUN_PROG_SETSOCKOPT(sock, level, optname, optval, optlen,   \
@@ -513,6 +528,8 @@ static inline int bpf_percpu_cgroup_storage_update(struct bpf_map *map,
 #define BPF_CGROUP_RUN_PROG_INET_SOCK(sk) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET_SOCK_RELEASE(sk) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET_BIND_LOCK(sk, uaddr, type, flags) ({ 0; })
+#define BPF_CGROUP_RUN_PROG_INET4_BIND(sk, uaddr) ({ 0; })
+#define BPF_CGROUP_RUN_PROG_INET6_BIND(sk, uaddr) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET4_POST_BIND(sk) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET6_POST_BIND(sk) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_INET4_CONNECT(sk, uaddr) ({ 0; })
@@ -525,7 +542,8 @@ static inline int bpf_percpu_cgroup_storage_update(struct bpf_map *map,
 #define BPF_CGROUP_RUN_PROG_UDP6_RECVMSG_LOCK(sk, uaddr) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_SOCK_OPS(sock_ops) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_DEVICE_CGROUP(type,major,minor,access) ({ 0; })
-#define BPF_CGROUP_RUN_PROG_SYSCTL(head,table,write,buf,count,pos) ({ 0; })
+#define BPF_CGROUP_RUN_PROG_SYSCTL(head,table,write,buf,count,pos,new_buf) \
+	({ *(new_buf) = NULL; 0; })
 #define BPF_CGROUP_GETSOCKOPT_MAX_OPTLEN(optlen) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_GETSOCKOPT(sock, level, optname, optval, \
 				       optlen, max_optlen, retval) ({ retval; })

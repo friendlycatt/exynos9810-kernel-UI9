@@ -30,6 +30,7 @@
 #include <net/netns/nftables.h>
 #include <net/netns/xfrm.h>
 #include <net/netns/mpls.h>
+#include <net/netns/bpf.h>
 #include <linux/ns_common.h>
 #include <linux/idr.h>
 #include <linux/skbuff.h>
@@ -140,6 +141,9 @@ struct net {
 	struct net_generic __rcu	*gen;
 
 	struct bpf_prog __rcu	*flow_dissector_prog;
+
+	/* Used to store attached BPF programs */
+	struct netns_bpf	bpf;
 
 	/* Note : following structs are cache line aligned */
 #ifdef CONFIG_XFRM
@@ -319,6 +323,11 @@ struct net *get_net_ns_by_id(struct net *net, int id);
 struct pernet_operations {
 	struct list_head list;
 	int (*init)(struct net *net);
+	/* Backported from v5.15: runs before any exit() method of any pernet
+	 * operation, so that BPF programs attached to the namespace can be
+	 * released while the namespace is still fully alive.
+	 */
+	void (*pre_exit)(struct net *net);
 	void (*exit)(struct net *net);
 	void (*exit_batch)(struct list_head *net_exit_list);
 	int *id;

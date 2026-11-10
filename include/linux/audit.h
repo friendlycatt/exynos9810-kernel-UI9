@@ -113,6 +113,9 @@ extern int audit_classify_compat_syscall(int abi, unsigned syscall);
 #define AUDIT_TTY_ENABLE	BIT(0)
 #define AUDIT_TTY_LOG_PASSWD	BIT(1)
 
+#define AUDIT_OFF	0
+#define AUDIT_ON	1
+
 struct filename;
 
 extern void audit_log_session_info(struct audit_buffer *ab);
@@ -245,6 +248,11 @@ extern void __audit_inode_child(struct inode *parent,
 				const unsigned char type);
 extern void __audit_seccomp(unsigned long syscall, long signr, int code);
 extern void __audit_ptrace(struct task_struct *t);
+
+static inline struct audit_context *audit_context(void)
+{
+	return current->audit_context;
+}
 
 static inline bool audit_dummy_context(void)
 {
@@ -468,6 +476,10 @@ static inline void audit_syscall_exit(void *pt_regs)
 static inline bool audit_dummy_context(void)
 {
 	return true;
+}
+static inline struct audit_context *audit_context(void)
+{
+	return NULL;
 }
 static inline struct filename *audit_reusename(const __user char *name)
 {

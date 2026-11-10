@@ -1352,6 +1352,8 @@ struct net_device_ops {
 	int			(*ndo_xdp_xmit)(struct net_device *dev,
 						struct xdp_buff *xdp);
 	void			(*ndo_xdp_flush)(struct net_device *dev);
+	/* Backported from v5.15 for BPF XDP peer-device redirects. */
+	struct net_device *	(*ndo_get_peer_dev)(struct net_device *dev);
 };
 
 /**
@@ -2519,6 +2521,22 @@ static inline int dev_recursion_level(void)
 	return this_cpu_read(xmit_recursion);
 }
 
+/* Backported from v5.15: named wrappers around the xmit recursion counter. */
+static inline bool dev_xmit_recursion(void)
+{
+	return unlikely(dev_recursion_level() > XMIT_RECURSION_LIMIT);
+}
+
+static inline void dev_xmit_recursion_inc(void)
+{
+	this_cpu_inc(xmit_recursion);
+}
+
+static inline void dev_xmit_recursion_dec(void)
+{
+	this_cpu_dec(xmit_recursion);
+}
+
 struct net_device *dev_get_by_index(struct net *net, int ifindex);
 struct net_device *__dev_get_by_index(struct net *net, int ifindex);
 struct net_device *dev_get_by_index_rcu(struct net *net, int ifindex);
@@ -3417,6 +3435,7 @@ struct sk_buff *validate_xmit_skb_list(struct sk_buff *skb, struct net_device *d
 struct sk_buff *dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 				    struct netdev_queue *txq, int *ret);
 typedef int (*bpf_op_t)(struct net_device *dev, struct netdev_bpf *bpf);
+int bpf_xdp_link_attach(const union bpf_attr *attr, struct bpf_prog *prog);
 u8 __dev_xdp_attached(struct net_device *dev, bpf_op_t xdp_op, u32 *prog_id);
 int __dev_forward_skb(struct net_device *dev, struct sk_buff *skb);
 int dev_forward_skb(struct net_device *dev, struct sk_buff *skb);
@@ -4313,6 +4332,16 @@ static inline bool netif_is_l3_master(const struct net_device *dev)
 static inline bool netif_is_l3_slave(const struct net_device *dev)
 {
 	return dev->priv_flags & IFF_L3MDEV_SLAVE;
+}
+
+/* Backported from v5.15 for the BPF FIB/redirect helpers. */
+static inline int dev_sdif(const struct net_device *dev)
+{
+#ifdef CONFIG_NET_L3_MASTER_DEV
+	if (netif_is_l3_slave(dev))
+		return dev->ifindex;
+#endif
+	return 0;
 }
 
 static inline bool netif_is_bridge_master(const struct net_device *dev)

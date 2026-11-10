@@ -144,6 +144,13 @@ enum perf_event_sample_format {
 };
 
 /*
+ * Backported from v5.15: internal-only bit meaning "the callchain has already
+ * been captured early (e.g. in NMI context) and lives in perf_sample_data".
+ * It must not be visible to userspace, hence the leading underscores.
+ */
+#define __PERF_SAMPLE_CALLCHAIN_EARLY		0x8000000000000000ULL /* non-ABI */
+
+/*
  * values to program into branch_sample_type when PERF_SAMPLE_BRANCH is set
  *
  * If the user does not pass priv level information via branch_sample_type,

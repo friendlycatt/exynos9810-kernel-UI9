@@ -79,6 +79,15 @@
  */
 #define BUILD_BUG() BUILD_BUG_ON_MSG(1, "BUILD_BUG failed")
 
+/*
+ * static_assert - check integer constant expression at build time
+ *
+ * Backported from v5.15: newer code (e.g. the BPF socket-map headers) uses
+ * static_assert() rather than BUILD_BUG_ON().
+ */
+#define __static_assert(expr, msg, ...) _Static_assert(expr, msg)
+#define static_assert(expr, ...) __static_assert(expr, ##__VA_ARGS__, #expr)
+
 #endif	/* __CHECKER__ */
 
 #endif	/* _LINUX_BUILD_BUG_H */

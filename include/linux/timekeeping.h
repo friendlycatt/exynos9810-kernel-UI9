@@ -45,6 +45,20 @@ static inline struct timespec current_kernel_time(void)
 	return timespec64_to_timespec(now);
 }
 
+/* Backported from v5.15 for the BPF ktime_get_coarse_ns() helper. */
+static inline ktime_t ktime_get_coarse(void)
+{
+	struct timespec64 ts;
+
+	ts = current_kernel_time64();
+	return timespec64_to_ktime(ts);
+}
+
+static inline u64 ktime_get_coarse_ns(void)
+{
+	return ktime_to_ns(ktime_get_coarse());
+}
+
 /*
  * timespec based interfaces
  */

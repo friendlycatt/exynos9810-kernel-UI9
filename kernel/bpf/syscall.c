@@ -25,6 +25,7 @@
 #include <uapi/linux/btf.h>
 #include <linux/bpf_lsm.h>
 #include <linux/poll.h>
+#include <linux/eventpoll.h>
 #include <linux/bpf-netns.h>
 #include <linux/rcupdate_trace.h>
 

@@ -29,6 +29,23 @@ extern void save_stack_trace_user(struct stack_trace *trace);
 # define save_stack_trace_user(trace)              do { } while (0)
 #endif
 
+/* Backported from v5.15: the BPF stackmap code was converted from the
+ * struct stack_trace API to the plain array API.
+ */
+static inline unsigned int
+stack_trace_save_tsk(struct task_struct *task, unsigned long *store,
+		     unsigned int size, unsigned int skipnr)
+{
+	struct stack_trace trace = {
+		.entries	= store,
+		.max_entries	= size,
+		.skip		= skipnr + 1,
+	};
+
+	save_stack_trace_tsk(task, &trace);
+	return trace.nr_entries;
+}
+
 #else
 # define save_stack_trace(trace)			do { } while (0)
 # define save_stack_trace_tsk(tsk, trace)		do { } while (0)

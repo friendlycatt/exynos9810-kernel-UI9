@@ -2,6 +2,7 @@
 
 #include <linux/bpf.h>
 #include <linux/filter.h>
+#include <linux/lockdep.h>
 #include <net/net_namespace.h>
 
 /*

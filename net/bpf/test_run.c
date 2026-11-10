@@ -165,9 +165,6 @@ out:
  * architecture dependent calling conventions. 7+ can be supported in the
  * future.
  */
-__diag_push();
-__diag_ignore(GCC, 8, "-Wmissing-prototypes",
-	      "Global functions as their definitions will be in vmlinux BTF");
 int noinline bpf_fentry_test1(int a)
 {
 	return a + 1;
@@ -217,7 +214,6 @@ int noinline bpf_modify_return_test(int a, int *b)
 	*b += 1;
 	return a + *b;
 }
-__diag_pop();
 
 ALLOW_ERROR_INJECTION(bpf_modify_return_test, ERRNO);
 
@@ -492,7 +488,7 @@ static int convert___skb_to_skb(struct sk_buff *skb, struct __sk_buff *__skb)
 
 	skb->mark = __skb->mark;
 	skb->priority = __skb->priority;
-	skb->tstamp = __skb->tstamp;
+	skb->tstamp = ns_to_ktime(__skb->tstamp);
 	memcpy(&cb->data, __skb->cb, QDISC_CB_PRIV_LEN);
 
 	if (__skb->wire_len == 0) {
@@ -522,7 +518,7 @@ static void convert_skb_to___skb(struct sk_buff *skb, struct __sk_buff *__skb)
 	__skb->mark = skb->mark;
 	__skb->priority = skb->priority;
 	__skb->ifindex = skb->dev->ifindex;
-	__skb->tstamp = skb->tstamp;
+	__skb->tstamp = ktime_to_ns(skb->tstamp);
 	memcpy(__skb->cb, &cb->data, QDISC_CB_PRIV_LEN);
 	__skb->wire_len = cb->pkt_len;
 	__skb->gso_segs = skb_shinfo(skb)->gso_segs;

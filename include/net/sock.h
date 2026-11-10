@@ -141,6 +141,7 @@ typedef __u64 __bitwise __addrpair;
  *	@skc_node: main hash linkage for various protocol lookup tables
  *	@skc_nulls_node: main hash linkage for TCP/UDP/UDP-Lite protocol
  *	@skc_tx_queue_mapping: tx queue number for this connection
+ *	@skc_rx_queue_mapping: rx queue number for this connection
  *	@skc_flags: place holder for sk_flags
  *		%SO_LINGER (l_onoff), %SO_BROADCAST, %SO_KEEPALIVE,
  *		%SO_OOBINLINE settings, %SO_TIMESTAMPING settings
@@ -217,6 +218,9 @@ struct sock_common {
 		struct hlist_nulls_node skc_nulls_node;
 	};
 	unsigned short		skc_tx_queue_mapping;
+#ifdef CONFIG_XPS
+	unsigned short		skc_rx_queue_mapping;
+#endif
 	union {
 		int		skc_incoming_cpu;
 		u32		skc_rcv_wnd;
@@ -234,7 +238,10 @@ struct sock_common {
 	/* public: */
 };
 
-struct bpf_sk_storage;
+/* v5.15 unified the per-object storage backends into struct bpf_local_storage,
+ * so the socket field now points at that type.
+ */
+struct bpf_local_storage;
 /**
   *	struct sock - network layer representation of sockets
   *	@__sk_common: shared layout with inet_timewait_sock
@@ -323,6 +330,9 @@ struct sock {
 #define sk_nulls_node		__sk_common.skc_nulls_node
 #define sk_refcnt		__sk_common.skc_refcnt
 #define sk_tx_queue_mapping	__sk_common.skc_tx_queue_mapping
+#ifdef CONFIG_XPS
+#define sk_rx_queue_mapping	__sk_common.skc_rx_queue_mapping
+#endif
 
 #define sk_dontcopy_begin	__sk_common.skc_dontcopy_begin
 #define sk_dontcopy_end		__sk_common.skc_dontcopy_end
@@ -494,7 +504,7 @@ struct sock {
 						  struct sk_buff *skb);
 	void                    (*sk_destruct)(struct sock *sk);
 #ifdef CONFIG_BPF_SYSCALL
-	struct bpf_sk_storage __rcu	*sk_bpf_storage;
+	struct bpf_local_storage __rcu	*sk_bpf_storage;
 #endif
 	struct sock_reuseport __rcu	*sk_reuseport_cb;
 	struct rcu_head		sk_rcu;
@@ -862,6 +872,16 @@ static inline void sock_reset_flag(struct sock *sk, enum sock_flags flag)
 	__clear_bit(flag, &sk->sk_flags);
 }
 
+/* Backported from v5.15 for the BPF setsockopt helpers. */
+static inline void sock_valbool_flag(struct sock *sk, enum sock_flags bit,
+				     int valbool)
+{
+	if (valbool)
+		sock_set_flag(sk, bit);
+	else
+		sock_reset_flag(sk, bit);
+}
+
 static inline bool sock_flag(const struct sock *sk, enum sock_flags flag)
 {
 	return test_bit(flag, &sk->sk_flags);
@@ -1133,6 +1153,9 @@ struct proto {
 	int			(*backlog_rcv) (struct sock *sk,
 						struct sk_buff *skb);
 
+	bool			(*bpf_bypass_getsockopt)(int level,
+							 int optname);
+
 	void		(*release_cb)(struct sock *sk);
 
 	/* Keeping track of sk's, looking them up, and port selection methods. */
@@ -1191,6 +1214,8 @@ struct proto {
 	atomic_t		socks;
 #endif
 	int			(*diag_destroy)(struct sock *sk, int err);
+	/* Backported from v5.15 for the BPF setsockopt helper. */
+	int			(*keepalive)(struct sock *sk, int valbool);
 };
 
 int proto_register(struct proto *prot, int alloc_slab);
@@ -1719,6 +1744,7 @@ static inline void sock_put(struct sock *sk)
  * (TCP_TIMEWAIT, TCP_NEW_SYN_RECV, ESTABLISHED...)
  */
 void sock_gen_put(struct sock *sk);
+void sock_pfree(struct sk_buff *skb);
 
 int __sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested,
 		     unsigned int trim_cap, bool refcounted);
@@ -2407,6 +2433,14 @@ static inline bool sk_fullsock(const struct sock *sk)
 	return (1 << sk->sk_state) & ~(TCPF_TIME_WAIT | TCPF_NEW_SYN_RECV);
 }
 
+/* Backported from v5.15: is this socket reference counted? */
+static inline bool
+sk_is_refcounted(struct sock *sk)
+{
+	/* Only full sockets have sk->sk_flags. */
+	return !sk_fullsock(sk) || !sock_flag(sk, SOCK_RCU_FREE);
+}
+
 /* This helper checks if a socket is a LISTEN or NEW_SYN_RECV
  * SYNACK messages can be attached to either ones (depending on SYNCOOKIE)
  */
@@ -2459,5 +2493,30 @@ extern int sysctl_optmem_max;
 
 extern __u32 sysctl_wmem_default;
 extern __u32 sysctl_rmem_default;
+
+/*
+ * Backported from v5.15 for the BPF redirect helpers.  This tree predates
+ * the skb/sk dst-pending-confirm tracking, and the confirmation is only a
+ * performance hint, so it is a no-op here.
+ */
+static inline void sock_confirm_neigh(struct sk_buff *skb, struct neighbour *n)
+{
+}
+
+/* Backported from v5.15: socket cookie accessors used by BPF helpers. */
+u64 __sock_gen_cookie(struct sock *sk);
+
+static inline u64 sock_gen_cookie(struct sock *sk)
+{
+	u64 res;
+
+	while (!(res = __sock_gen_cookie(sk)))
+		cpu_relax();
+
+	return res;
+}
+
+int sock_bindtoindex(struct sock *sk, int ifindex, bool lock_sk);
+void sk_get_meminfo(const struct sock *sk, u32 *meminfo);
 
 #endif	/* _SOCK_H */

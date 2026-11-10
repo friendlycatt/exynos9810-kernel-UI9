@@ -370,8 +370,12 @@ static int cpu_map_kthread_run(void *data)
 				continue;
 			}
 
-			/* Inject into network stack */
-			ret = netif_receive_skb_core(skb);
+			/* Inject into network stack.
+			 * v5.15 uses netif_receive_skb_core(), which this tree
+			 * keeps static inside net/core/dev.c; the exported
+			 * netif_receive_skb() does the same job here.
+			 */
+			ret = netif_receive_skb(skb);
 			if (ret == NET_RX_DROP)
 				drops++;
 		}

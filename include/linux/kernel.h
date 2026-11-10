@@ -72,6 +72,8 @@
 #define round_down(x, y) ((x) & ~__round_mask(x, y))
 
 #define FIELD_SIZEOF(t, f) (sizeof(((t*)0)->f))
+/* Backported from v5.15: sizeof_field() replaces FIELD_SIZEOF(). */
+#define sizeof_field(TYPE, MEMBER) sizeof((((TYPE *)0)->MEMBER))
 #define DIV_ROUND_UP __KERNEL_DIV_ROUND_UP
 #define DIV_ROUND_UP_ULL(ll,d) \
 	({ unsigned long long _tmp = (ll)+(d)-1; do_div(_tmp, d); _tmp; })
@@ -217,6 +219,13 @@ extern void __cant_sleep(const char *file, int line, int preempt_offset);
 #endif
 
 #define might_sleep_if(cond) do { if (cond) might_sleep(); } while (0)
+
+#ifndef CONFIG_PREEMPT_RT
+# define cant_migrate()		cant_sleep()
+#else
+  /* Placeholder for now */
+# define cant_migrate()		do { } while (0)
+#endif
 
 /**
  * abs - return absolute value of an argument

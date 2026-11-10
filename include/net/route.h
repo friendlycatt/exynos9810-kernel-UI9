@@ -24,6 +24,7 @@
 #ifndef _ROUTE_H
 #define _ROUTE_H
 
+#include <net/arp.h>
 #include <net/dst.h>
 #include <net/inetpeer.h>
 #include <net/flow.h>
@@ -333,6 +334,19 @@ static inline int ip4_dst_hoplimit(const struct dst_entry *dst)
 	if (hoplimit == 0)
 		hoplimit = net->ipv4.sysctl_ip_default_ttl;
 	return hoplimit;
+}
+
+/* Backported from v5.15 for the BPF redirect helpers. */
+static inline struct neighbour *ip_neigh_gw4(struct net_device *dev,
+					     __be32 daddr)
+{
+	struct neighbour *neigh;
+
+	neigh = __ipv4_neigh_lookup_noref(dev, (__force u32)daddr);
+	if (unlikely(!neigh))
+		neigh = __neigh_create(&arp_tbl, &daddr, dev, false);
+
+	return neigh;
 }
 
 #endif	/* _ROUTE_H */

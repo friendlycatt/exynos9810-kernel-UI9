@@ -33,8 +33,9 @@ extern struct sock *reuseport_select_sock(struct sock *sk,
 					  u32 hash,
 					  struct sk_buff *skb,
 					  int hdr_len);
-extern struct bpf_prog *reuseport_attach_prog(struct sock *sk,
-					      struct bpf_prog *prog);
+/* v5.15 returns an int and frees the replaced program internally. */
+extern int reuseport_attach_prog(struct sock *sk, struct bpf_prog *prog);
+extern int reuseport_detach_prog(struct sock *sk);
 int reuseport_get_id(struct sock_reuseport *reuse);
 
 #endif  /* _SOCK_REUSEPORT_H */

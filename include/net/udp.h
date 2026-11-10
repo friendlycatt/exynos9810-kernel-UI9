@@ -355,4 +355,8 @@ void udp_encap_enable(void);
 #if IS_ENABLED(CONFIG_IPV6)
 void udpv6_encap_enable(void);
 #endif
+
+#ifdef CONFIG_BPF_SYSCALL
+struct proto *udp_bpf_get_proto(struct sock *sk, struct sk_psock *psock);
+#endif /* CONFIG_BPF_SYSCALL */
 #endif	/* _UDP_H */

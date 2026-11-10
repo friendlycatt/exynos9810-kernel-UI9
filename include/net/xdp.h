@@ -6,6 +6,9 @@
 #ifndef __LINUX_NET_XDP_H__
 #define __LINUX_NET_XDP_H__
 
+/* Needed for SKB_DATA_ALIGN()/struct skb_shared_info in xdp_data_hard_end() */
+#include <linux/skbuff.h>
+
 /**
  * DOC: XDP RX-queue information
  *
@@ -33,11 +36,152 @@
  * also mandatory during RX-ring setup.
  */
 
+struct xdp_mem_info {
+	u32 type; /* enum xdp_mem_type, but known size type */
+	u32 id;
+};
+
 struct xdp_rxq_info {
 	struct net_device *dev;
 	u32 queue_index;
 	u32 reg_state;
+	struct xdp_mem_info mem;
 } ____cacheline_aligned; /* perf critical, avoid false-sharing */
+
+/*
+ * Backported from v5.15: the BPF/XDP data path needs the frame bookkeeping
+ * types.  This tree has no page_pool/mem-model support, so the memory type
+ * is only carried around and never used.
+ */
+enum xdp_mem_type {
+	MEM_TYPE_PAGE_SHARED = 0, /* Split-page refcnt based model */
+	MEM_TYPE_PAGE_ORDER0,     /* Orig XDP full page model */
+	MEM_TYPE_PAGE_POOL,
+	MEM_TYPE_ZERO_COPY,
+	MEM_TYPE_MAX,
+};
+
+struct xdp_txq_info {
+	struct net_device *dev;
+};
+
+struct xdp_buff {
+	void *data;
+	void *data_end;
+	void *data_meta;
+	void *data_hard_start;
+	unsigned long handle;
+	struct xdp_rxq_info *rxq;
+	struct xdp_txq_info *txq;
+	u32 frame_sz; /* frame size to deduce data_hard_end/reserved tailroom */
+};
+
+/* Backported from v5.15: does the program use the metadata area? */
+static inline bool xdp_data_meta_unsupported(const struct xdp_buff *xdp)
+{
+	return unlikely(xdp->data_meta > xdp->data);
+}
+
+/* Reserve memory area at end-of data area. */
+#define xdp_data_hard_end(xdp)				\
+	((xdp)->data_hard_start + (xdp)->frame_sz -	\
+	 SKB_DATA_ALIGN(sizeof(struct skb_shared_info)))
+
+struct xdp_frame {
+	void *data;
+	u16 len;
+	u16 headroom;
+	u32 metasize:8;
+	u32 frame_sz:24;
+	/* Lifetime of xdp_rxq_info is limited to NAPI/enqueue time,
+	 * while mem info is valid on remote CPU.
+	 */
+	struct xdp_mem_info mem;
+	struct net_device *dev_rx; /* used by cpumap */
+};
+
+struct xdp_cpumap_stats {
+	unsigned int redirect;
+	unsigned int pass;
+	unsigned int drop;
+};
+
+/* Clear kernel pointers in xdp_frame */
+static inline void xdp_scrub_frame(struct xdp_frame *frame)
+{
+	frame->data = NULL;
+	frame->dev_rx = NULL;
+}
+
+/* Upstream only has work to do here for MEM_TYPE_PAGE_POOL, which this tree
+ * does not support (no page_pool, no DMA mapping bookkeeping).
+ */
+static inline void xdp_release_frame(struct xdp_frame *xdpf)
+{
+}
+
+/* Avoids inlining WARN macro in fast-path */
+void xdp_warn(const char *msg, const char *func, const int line);
+#define XDP_WARN(msg) xdp_warn(msg, __func__, __LINE__)
+
+/* Reconstruct an xdp_buff from a frame so a program can run on it again. */
+static inline
+void xdp_convert_frame_to_buff(struct xdp_frame *frame, struct xdp_buff *xdp)
+{
+	xdp->data_hard_start = frame->data - frame->headroom - sizeof(*frame);
+	xdp->data = frame->data;
+	xdp->data_end = frame->data + frame->len;
+	xdp->data_meta = frame->data - frame->metasize;
+	xdp->frame_sz = frame->frame_sz;
+}
+
+/* Store back the (possibly modified) buffer geometry into the frame. */
+static inline
+int xdp_update_frame_from_buff(struct xdp_buff *xdp,
+			       struct xdp_frame *xdp_frame)
+{
+	int metasize, headroom;
+
+	/* Assure headroom is available for storing info */
+	headroom = xdp->data - xdp->data_hard_start;
+	metasize = xdp->data - xdp->data_meta;
+	metasize = metasize > 0 ? metasize : 0;
+	if (unlikely((headroom - metasize) < sizeof(*xdp_frame)))
+		return -ENOSPC;
+
+	/* Catch if driver didn't reserve tailroom for skb_shared_info */
+	if (unlikely(xdp->data_end > xdp_data_hard_end(xdp))) {
+		XDP_WARN("Driver BUG: missing reserved tailroom");
+		return -ENOSPC;
+	}
+
+	xdp_frame->data = xdp->data;
+	xdp_frame->len  = xdp->data_end - xdp->data;
+	xdp_frame->headroom = headroom - sizeof(*xdp_frame);
+	xdp_frame->metasize = metasize;
+	xdp_frame->frame_sz = xdp->frame_sz;
+
+	return 0;
+}
+
+/*
+ * Backported from v5.15: devmap/cpumap hand frames around after the driver
+ * returned from its NAPI poll.  This tree only ever uses the page-shared
+ * memory model (no page_pool, no zero-copy), so the helpers below are
+ * implemented for that model in net/core/xdp.c.
+ */
+void xdp_return_frame(struct xdp_frame *xdpf);
+void xdp_return_frame_rx_napi(struct xdp_frame *xdpf);
+void xdp_return_buff(struct xdp_buff *xdp);
+struct xdp_frame *xdp_convert_buff_to_frame(struct xdp_buff *xdp);
+
+/* Invalidate the metadata area so that a program re-run on the frame cannot
+ * see stale metadata.  Matches the v5.15 semantics of "no metadata".
+ */
+static inline void xdp_set_data_meta_invalid(struct xdp_buff *xdp)
+{
+	xdp->data_meta = xdp->data + 1;
+}
 
 int xdp_rxq_info_reg(struct xdp_rxq_info *xdp_rxq,
 		     struct net_device *dev, u32 queue_index);

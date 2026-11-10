@@ -1797,4 +1797,22 @@ static inline int security_perf_event_write(struct perf_event *event)
 #endif /* CONFIG_SECURITY */
 #endif /* CONFIG_PERF_EVENTS */
 
+/*
+ * Minimal lockdown stub, backported only as far as the 5.15 BPF helpers need
+ * it.  This tree has no lockdown LSM, so reads are never blocked.
+ */
+enum lockdown_reason {
+	LOCKDOWN_NONE,
+	LOCKDOWN_MODULE_SIGNATURE,
+	LOCKDOWN_DEV_MEM,
+	LOCKDOWN_BPF_READ,
+	LOCKDOWN_INTEGRITY_MAX,
+	LOCKDOWN_CONFIDENTIALITY_MAX,
+};
+
+static inline int security_locked_down(enum lockdown_reason what)
+{
+	return 0;
+}
+
 #endif /* ! __LINUX_SECURITY_H */

@@ -8,6 +8,7 @@
 #include <net/sock_reuseport.h>
 #include <linux/bpf.h>
 #include <linux/idr.h>
+#include <linux/lockdep.h>
 #include <linux/filter.h>
 #include <linux/rcupdate.h>
 
@@ -63,7 +64,10 @@ int reuseport_alloc(struct sock *sk, bool bind_inany)
 		goto out;
 	}
 
-	id = ida_alloc(&reuseport_ida, GFP_ATOMIC);
+	/* v5.15 uses ida_alloc()/ida_free(); this tree only has the older
+	 * ida_simple_get()/ida_simple_remove() pair.
+	 */
+	id = ida_simple_get(&reuseport_ida, 0, 0, GFP_ATOMIC);
 	if (id < 0) {
 		kfree(reuse);
 		ret = id;
@@ -123,7 +127,7 @@ static void reuseport_free_rcu(struct rcu_head *head)
 
 	reuse = container_of(head, struct sock_reuseport, rcu);
 	sk_reuseport_prog_free(rcu_dereference_protected(reuse->prog, 1));
-	ida_free(&reuseport_ida, reuse->reuseport_id);
+	ida_simple_remove(&reuseport_ida, reuse->reuseport_id);
 	kfree(reuse);
 }
 
@@ -339,12 +343,15 @@ int reuseport_detach_prog(struct sock *sk)
 	if (!rcu_access_pointer(sk->sk_reuseport_cb))
 		return sk->sk_reuseport ? -ENOENT : -EINVAL;
 
-	old_prog = NULL;
 	spin_lock_bh(&reuseport_lock);
 	reuse = rcu_dereference_protected(sk->sk_reuseport_cb,
 					  lockdep_is_held(&reuseport_lock));
-	rcu_swap_protected(reuse->prog, old_prog,
-			   lockdep_is_held(&reuseport_lock));
+	/* rcu_swap_protected() was removed upstream in favour of an explicit
+	 * xchg under the RCU read/write lock discipline.
+	 */
+	old_prog = rcu_dereference_protected(reuse->prog,
+					     lockdep_is_held(&reuseport_lock));
+	RCU_INIT_POINTER(reuse->prog, NULL);
 	spin_unlock_bh(&reuseport_lock);
 
 	if (!old_prog)

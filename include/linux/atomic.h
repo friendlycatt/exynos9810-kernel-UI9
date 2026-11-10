@@ -1075,6 +1075,30 @@ static inline long long atomic64_fetch_andnot_release(long long i, atomic64_t *v
 #define atomic64_cond_read_relaxed(v, c)	smp_cond_load_relaxed(&(v)->counter, (c))
 #define atomic64_cond_read_acquire(v, c)	smp_cond_load_acquire(&(v)->counter, (c))
 
+/**
+ * atomic64_fetch_add_unless - add unless the number is already a given value
+ * @v: pointer of type atomic64_t
+ * @a: the amount to add to v...
+ * @u: ...unless v is equal to u.
+ *
+ * Atomically adds @a to @v, if @v was not already @u.
+ * Returns the original value of @v.
+ */
+#ifndef atomic64_fetch_add_unless
+static inline long long atomic64_fetch_add_unless(atomic64_t *v, long long a,
+						  long long u)
+{
+	long long c = atomic64_read(v);
+
+	do {
+		if (unlikely(c == u))
+			break;
+	} while (!atomic64_try_cmpxchg(v, &c, c + a));
+
+	return c;
+}
+#endif
+
 #include <asm-generic/atomic-long.h>
 
 #endif /* _LINUX_ATOMIC_H */

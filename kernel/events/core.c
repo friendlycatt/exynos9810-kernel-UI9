@@ -7417,6 +7417,13 @@ static void perf_event_bpf_output(struct perf_event *event, void *data)
 	perf_output_end(&handle);
 }
 
+static void bpf_get_prog_name(const struct bpf_prog *prog, char *sym)
+{
+	sym[0] = '\0';
+	snprintf(sym, KSYM_NAME_LEN, "bpf_prog_%s_%x", prog->aux->name,
+		 prog->aux->id);
+}
+
 static void perf_event_bpf_emit_ksymbols(struct bpf_prog *prog,
 					 enum perf_bpf_event_type type)
 {
@@ -10921,6 +10928,19 @@ struct file *perf_event_get(unsigned int fd)
 
 	return file;
 }
+
+/* Backported from v5.15: fetch the event behind a perf file without taking a
+ * reference.  Used by the BPF syscall to resolve BPF_LINK_TYPE_PERF_EVENT.
+ */
+const struct perf_event *perf_get_event(struct file *file)
+{
+	struct perf_event *event = file->private_data;
+
+	WARN_ON_ONCE(!event);
+
+	return event;
+}
+EXPORT_SYMBOL_GPL(perf_get_event);
 
 const struct perf_event_attr *perf_event_attrs(struct perf_event *event)
 {

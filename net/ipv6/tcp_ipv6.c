@@ -2249,6 +2249,7 @@ struct proto tcpv6_prot = {
 	.sendmsg		= tcp_sendmsg,
 	.sendpage		= tcp_sendpage,
 	.backlog_rcv		= tcp_v6_do_rcv,
+	.bpf_bypass_getsockopt	= tcp_bpf_bypass_getsockopt,
 	.release_cb		= tcp_release_cb,
 	.hash			= inet6_hash,
 	.unhash			= inet_unhash,

@@ -101,6 +101,9 @@ struct inet_connection_sock {
  	struct timer_list	  icsk_retransmit_timer;
  	struct timer_list	  icsk_delack_timer;
 	__u32			  icsk_rto;
+	/* Backported from v5.15 for the BPF setsockopt(TCP_*) helpers. */
+	__u32			  icsk_rto_min;
+	__u32			  icsk_delack_max;
 	__u32			  icsk_pmtu_cookie;
 	const struct tcp_congestion_ops *icsk_ca_ops;
 	const struct inet_connection_sock_af_ops *icsk_af_ops;
@@ -333,4 +336,12 @@ void inet_csk_update_fastreuse(struct inet_bind_bucket *tb,
 			       struct sock *sk);
 
 struct dst_entry *inet_csk_update_pmtu(struct sock *sk, u32 mtu);
+
+/* Backported from v5.15: sockmap/skmsg refuses sockets that have an ULP
+ * (upper layer protocol) installed, because it would fight over sk_user_data.
+ */
+static inline bool inet_csk_has_ulp(struct sock *sk)
+{
+	return inet_sk(sk)->is_icsk && !!inet_csk(sk)->icsk_ulp_ops;
+}
 #endif /* _INET_CONNECTION_SOCK_H */

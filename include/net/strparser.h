@@ -61,6 +61,16 @@ static inline struct strp_rx_msg *strp_rx_msg(struct sk_buff *skb)
 		offsetof(struct qdisc_skb_cb, data));
 }
 
+/*
+ * Backported from v5.15: the sk_skb BPF helpers expose a 20 byte private
+ * area inside skb->cb, immediately followed by the stream-parser message.
+ */
+struct sk_skb_cb {
+#define SK_SKB_CB_PRIV_LEN 20
+	unsigned char data[SK_SKB_CB_PRIV_LEN];
+	struct strp_rx_msg strp;
+};
+
 /* Structure for an attached lower socket */
 struct strparser {
 	struct sock *sk;

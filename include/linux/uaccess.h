@@ -78,6 +78,8 @@ static inline unsigned long __copy_from_user_nocache(void *to,
 
 #endif		/* ARCH_HAS_NOCACHE_UACCESS */
 
+extern __must_check int check_zeroed_user(const void __user *from, size_t size);
+
 /*
  * probe_kernel_read(): safely attempt to read from a location
  * @dst: pointer to the buffer that shall take the data
@@ -88,6 +90,13 @@ static inline unsigned long __copy_from_user_nocache(void *to,
  * happens, handle that and return -EFAULT.
  */
 extern long probe_kernel_read(void *dst, const void *src, size_t size);
+
+/* Backported from v5.15: renamed variant used by newer BPF/BTF code. */
+static inline int copy_from_kernel_nofault(void *dst, const void *src,
+					   size_t size)
+{
+	return probe_kernel_read(dst, src, size);
+}
 extern long probe_kernel_read_strict(void *dst, const void *src, size_t size);
 extern long __probe_kernel_read(void *dst, const void *src, size_t size);
 
