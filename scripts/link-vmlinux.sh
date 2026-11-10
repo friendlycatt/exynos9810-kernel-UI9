@@ -174,23 +174,68 @@ vmlinux_link()
 }
 
 # generate .BTF typeinfo from DWARF debuginfo
+# ${1} - vmlinux image
+# ${2} - file to dump raw BTF data into
 gen_btf()
 {
 	local pahole_ver;
 
 	if ! [ -x "$(command -v ${PAHOLE})" ]; then
 		info "BTF" "${1}: pahole (${PAHOLE}) is not available"
-		return 0
+		return 1
 	fi
 
 	pahole_ver=$(${PAHOLE} --version | sed -E 's/v([0-9]+)\.([0-9]+)/\1\2/')
 	if [ "${pahole_ver}" -lt "113" ]; then
 		info "BTF" "${1}: pahole version $(${PAHOLE} --version) is too old, need at least v1.13"
+		return 1
+	fi
+
+	info "BTF" ${2}
+	vmlinux_link "" ${1}
+	LLVM_OBJCOPY=${OBJCOPY} ${PAHOLE} -J ${1}
+
+	# Create ${2} which contains just .BTF section but no symbols. Add
+	# SHF_ALLOC because .BTF will be part of the vmlinux image. --strip-all
+	# deletes all symbols including __start_BTF and __stop_BTF, which will
+	# be redefined in the linker script. Add 2>/dev/null to suppress GNU
+	# objcopy warnings: "empty loadable segment detected at ..."
+	${OBJCOPY} --only-section=.BTF --set-section-flags .BTF=alloc,readonly \
+		--strip-all ${1} ${2} 2>/dev/null
+	# Change e_type to ET_REL so that it can be used to link final vmlinux.
+	# Unlike GNU ld, lld does not allow an ET_EXEC input.
+	printf '\1' | dd of=${2} conv=notrunc bs=1 seek=16 status=none
+}
+
+# fill in the type ids in .BTF_ids
+# ${1} - vmlinux image
+#
+# include/linux/btf_ids.h emits every BTF_ID_LIST/BTF_SET entry as a zeroed
+# 4-byte slot plus a __BTF_ID__<kind>__<name>__<n> symbol, expecting a later
+# pass to replace the zeros with real type ids.  Upstream does that with
+# tools/bpf/resolve_btfids, which this tree does not have, so
+# scripts/resolve_btfids.py does the same job from the .BTF blob that is now
+# part of the image.  Without it every list resolves to type id 0.
+resolve_btfids()
+{
+	local py
+
+	if ! [ -f "${srctree}/scripts/resolve_btfids.py" ]; then
 		return 0
 	fi
 
-	info "BTF" ${1}
-	LLVM_OBJCOPY=${OBJCOPY} ${PAHOLE} -J ${1}
+	if command -v python3 >/dev/null 2>&1; then
+		py=python3
+	elif command -v python >/dev/null 2>&1; then
+		py=python
+	else
+		info "BTFIDS" "${1}: no python interpreter, leaving .BTF_ids unresolved"
+		return 0
+	fi
+
+	info "BTFIDS" ${1}
+	${py} "${srctree}/scripts/resolve_btfids.py" ${1} || \
+		info "BTFIDS" "${1}: resolver failed, leaving .BTF_ids unresolved"
 }
 
 # Create ${2} .o file with all symbols from the ${1} object file
@@ -245,6 +290,7 @@ cleanup()
 	rm -f .tmp_version
 	rm -f .tmp_symversions
 	rm -f .tmp_vmlinux*
+	rm -f .btf.vmlinux.bin.o
 	rm -f built-in.o
 	rm -f System.map
 	rm -f vmlinux
@@ -320,6 +366,18 @@ if [ -n "${CONFIG_LTO_CLANG}" ]; then
 	recordmcount vmlinux.o
 fi
 
+# Generate .BTF and link it back into vmlinux as an allocatable section, so
+# that btf_vmlinux (and /sys/kernel/btf/vmlinux) can be built at runtime.
+# This has to happen before the kallsyms passes: the blob is part of the image
+# from the very first link on, otherwise each pass would move every address
+# and the System.map consistency check further down would fail.
+btf_vmlinux_bin_o=""
+if [ -n "${CONFIG_DEBUG_INFO_BTF}" ]; then
+	if gen_btf .tmp_vmlinux.btf .btf.vmlinux.bin.o ; then
+		btf_vmlinux_bin_o=.btf.vmlinux.bin.o
+	fi
+fi
+
 kallsymso=""
 kallsyms_vmlinux=""
 if [ -n "${CONFIG_KALLSYMS}" ]; then
@@ -347,11 +405,11 @@ if [ -n "${CONFIG_KALLSYMS}" ]; then
 	kallsyms_vmlinux=.tmp_vmlinux2
 
 	# step 1
-	vmlinux_link "" .tmp_vmlinux1
+	vmlinux_link "${btf_vmlinux_bin_o}" .tmp_vmlinux1
 	kallsyms .tmp_vmlinux1 .tmp_kallsyms1.o
 
 	# step 2
-	vmlinux_link .tmp_kallsyms1.o .tmp_vmlinux2
+	vmlinux_link ".tmp_kallsyms1.o ${btf_vmlinux_bin_o}" .tmp_vmlinux2
 	kallsyms .tmp_vmlinux2 .tmp_kallsyms2.o
 
 	# step 2a
@@ -359,17 +417,19 @@ if [ -n "${CONFIG_KALLSYMS}" ]; then
 		kallsymso=.tmp_kallsyms3.o
 		kallsyms_vmlinux=.tmp_vmlinux3
 
-		vmlinux_link .tmp_kallsyms2.o .tmp_vmlinux3
+		vmlinux_link ".tmp_kallsyms2.o ${btf_vmlinux_bin_o}" .tmp_vmlinux3
 
 		kallsyms .tmp_vmlinux3 .tmp_kallsyms3.o
 	fi
 fi
 
 info LD vmlinux
-vmlinux_link "${kallsymso}" vmlinux
+vmlinux_link "${kallsymso} ${btf_vmlinux_bin_o}" vmlinux
 
+# The .BTF blob is already linked in at this point, so the resolver can read
+# the type table straight out of the image.
 if [ -n "${CONFIG_DEBUG_INFO_BTF}" ]; then
-	gen_btf vmlinux
+	resolve_btfids vmlinux
 fi
 
 if [ -n "${CONFIG_BUILDTIME_EXTABLE_SORT}" ]; then
