@@ -9,6 +9,11 @@
 #include <net/tcp.h>
 #include <net/tls.h>
 
+/* Defined below, but needed by the strparser callbacks above it once
+ * CONFIG_BPF_STREAM_PARSER is enabled.
+ */
+static struct sk_psock *sk_psock_from_strp(struct strparser *strp);
+
 static bool sk_msg_try_coalesce_ok(struct sk_msg *msg, int elem_first_coalesce)
 {
 	if (msg->sg.end > msg->sg.start &&
